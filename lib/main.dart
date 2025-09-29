@@ -1,122 +1,368 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show rootBundle;
+import 'package:pdf/widgets.dart' as pw;
+import 'package:pdf/pdf.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:open_file/open_file.dart';
 
 void main() {
-  runApp(const MyApp());
+  runApp(const PdfApp());
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class PdfApp extends StatelessWidget {
+  const PdfApp({super.key});
 
-  // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Demo',
-      theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
-      ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
+      title: 'PDF Generator',
+      theme: ThemeData(primarySwatch: Colors.blue),
+      home: const HomeScreen(),
     );
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
+// Item model
+class Item {
+  String description;
+  int qty;
+  double price;
 
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
-  final String title;
-
-  @override
-  State<MyHomePage> createState() => _MyHomePageState();
+  Item({this.description = "", this.qty = 1, this.price = 0});
 }
 
-class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
+class HomeScreen extends StatefulWidget {
+  const HomeScreen({super.key});
 
-  void _incrementCounter() {
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  // Form fields
+  String _docType = 'Quotation';
+  final _clientNameController = TextEditingController();
+  final _clientAddressController = TextEditingController();
+  final _dateController = TextEditingController();
+  final _invoiceController = TextEditingController();
+  final _refNoController = TextEditingController();
+
+  // Items
+  List<Item> items = [];
+
+  void _addItem() {
     setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
+      items.add(Item());
     });
+  }
+
+  void _removeItem(int index) {
+    setState(() {
+      items.removeAt(index);
+    });
+  }
+
+  double get total {
+    return items.fold(0, (sum, item) => sum + (item.qty * item.price));
+  }
+
+  // PDF Generator
+  Future<void> _generatePdf() async {
+    final pdf = pw.Document();
+
+    // Load logo
+    final logoBytes = await rootBundle.load("assets/logo.png");
+    final logo = pw.MemoryImage(logoBytes.buffer.asUint8List());
+
+    pdf.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        build: (context) => [
+          // Header
+          pw.Row(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            children: [
+              pw.Image(logo, width: 80),
+              pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.end,
+                children: [
+                  pw.Text("AASHUTOSH SALES CENTER",
+                      style: pw.TextStyle(
+                          fontSize: 16, fontWeight: pw.FontWeight.bold)),
+                  pw.Text("Office No.124, 1st Floor, Meghmalhar Complex"),
+                  pw.Text("Sector-11, Gandhinagar: 382010"),
+                  pw.Text("GSTIN: 24AAJPT3116D1Z0 | PAN: AAJPT3116D"),
+                  pw.Text("Phone: +91 9426513615"),
+                ],
+              ),
+            ],
+          ),
+          pw.SizedBox(height: 20),
+
+          // Title
+          pw.Center(
+            child: pw.Text(
+              _docType == "Quotation" ? "QUOTATION" : "FINAL BILL",
+              style:
+              pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold),
+            ),
+          ),
+          pw.SizedBox(height: 20),
+
+          // Client + Doc info
+          pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Text("To: ${_clientNameController.text}"),
+                  pw.Text(_clientAddressController.text),
+                ],
+              ),
+              pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Text("Date: ${_dateController.text}"),
+                  if (_docType == "Bill")
+                    pw.Text("Invoice No: ${_invoiceController.text}"),
+                  if (_docType == "Bill")
+                    pw.Text("Ref No: ${_refNoController.text}"),
+                ],
+              ),
+            ],
+          ),
+          pw.SizedBox(height: 20),
+
+          // Items Table
+          pw.Table.fromTextArray(
+            headers: _docType == "Quotation"
+                ? ["Description", "Unit Price"]
+                : ["Qty", "Description", "Unit Price", "Total"],
+            data: items.map((item) {
+              if (_docType == "Quotation") {
+                return [item.description, "₹${item.price}"];
+              } else {
+                return [
+                  item.qty.toString(),
+                  item.description,
+                  "₹${item.price}",
+                  "₹${item.qty * item.price}"
+                ];
+              }
+            }).toList(),
+            border: pw.TableBorder.all(),
+            cellAlignment: pw.Alignment.centerLeft,
+            headerStyle: pw.TextStyle(
+                fontWeight: pw.FontWeight.bold, color: PdfColors.white),
+            headerDecoration: const pw.BoxDecoration(color: PdfColors.blue),
+          ),
+          pw.SizedBox(height: 20),
+
+          // Grand total
+          if (_docType == "Bill")
+            pw.Align(
+              alignment: pw.Alignment.centerRight,
+              child: pw.Text("Grand Total: ₹$total",
+                  style: pw.TextStyle(
+                      fontSize: 16, fontWeight: pw.FontWeight.bold)),
+            ),
+
+          // Footer
+          pw.SizedBox(height: 30),
+          pw.Text("Bank: HDFC Bank, A/C: 50200109706541"),
+          pw.Text("IFSC: HDFC0007455"),
+          if (_docType == "Bill")
+            pw.Text(
+                "Goods once sold will not be taken back. No complaints after 7 days."),
+          pw.SizedBox(height: 40),
+          pw.Align(
+            alignment: pw.Alignment.centerRight,
+            child: pw.Text("Authorized Signatory"),
+          ),
+        ],
+      ),
+    );
+
+    // Save locally
+    final dir = await getApplicationDocumentsDirectory();
+    final file = File(
+        "${dir.path}/${_docType}_${DateTime.now().millisecondsSinceEpoch}.pdf");
+    await file.writeAsBytes(await pdf.save());
+
+    // Open the PDF
+    await OpenFile.open(file.path);
   }
 
   @override
   Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
     return Scaffold(
-      appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
-      ),
-      body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
+      appBar: AppBar(title: const Text("Quotation / Bill Generator")),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
         child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            const Text('You have pushed the button this many times:'),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headlineMedium,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Dropdown
+            DropdownButtonFormField<String>(
+              value: _docType,
+              items: const [
+                DropdownMenuItem(value: 'Quotation', child: Text('Quotation')),
+                DropdownMenuItem(value: 'Bill', child: Text('Bill')),
+              ],
+              onChanged: (val) {
+                setState(() => _docType = val!);
+              },
+              decoration: const InputDecoration(
+                labelText: 'Document Type',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // Common fields
+            TextField(
+              controller: _dateController,
+              decoration: const InputDecoration(
+                labelText: "Date",
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            TextField(
+              controller: _clientNameController,
+              decoration: const InputDecoration(
+                labelText: "Client Name",
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            TextField(
+              controller: _clientAddressController,
+              decoration: const InputDecoration(
+                labelText: "Client Address",
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // Extra fields only if Bill
+            if (_docType == 'Bill') ...[
+              TextField(
+                controller: _invoiceController,
+                decoration: const InputDecoration(
+                  labelText: "Invoice No.",
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _refNoController,
+                decoration: const InputDecoration(
+                  labelText: "Ref No.",
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+
+            // Dynamic Items List
+            const Text("Items",
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+
+            ListView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: items.length,
+              itemBuilder: (context, index) {
+                final item = items[index];
+                return Card(
+                  margin: const EdgeInsets.symmetric(vertical: 6),
+                  child: Padding(
+                    padding: const EdgeInsets.all(8),
+                    child: Column(
+                      children: [
+                        TextField(
+                          decoration:
+                          const InputDecoration(labelText: "Description"),
+                          onChanged: (val) => item.description = val,
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                decoration:
+                                const InputDecoration(labelText: "Qty"),
+                                keyboardType: TextInputType.number,
+                                onChanged: (val) =>
+                                item.qty = int.tryParse(val) ?? 1,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: TextField(
+                                decoration: const InputDecoration(
+                                    labelText: "Unit Price"),
+                                keyboardType: TextInputType.number,
+                                onChanged: (val) =>
+                                item.price = double.tryParse(val) ?? 0,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text("Total: ₹${item.qty * item.price}"),
+                            IconButton(
+                              onPressed: () => _removeItem(index),
+                              icon: const Icon(Icons.delete, color: Colors.red),
+                            )
+                          ],
+                        )
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 8),
+
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: _addItem,
+                icon: const Icon(Icons.add),
+                label: const Text("Add Item"),
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            Text("Grand Total: ₹$total",
+                style:
+                const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+
+            const SizedBox(height: 24),
+
+            // Submit button
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: _generatePdf,
+                child: const Text("Generate PDF"),
+              ),
             ),
           ],
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
-      ), // This trailing comma makes auto-formatting nicer for build methods.
     );
   }
 }
