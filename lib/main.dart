@@ -5,6 +5,8 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:pdf/pdf.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:open_file/open_file.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:number_to_words/number_to_words.dart';
 
 void main() {
   runApp(const PdfApp());
@@ -68,7 +70,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // PDF Generator
-  Future<void> _generatePdf() async {
+  Future<void> _generatePdf(BuildContext context) async {
     final pdf = pw.Document();
 
     // Load logo
@@ -84,32 +86,55 @@ class _HomeScreenState extends State<HomeScreen> {
             crossAxisAlignment: pw.CrossAxisAlignment.start,
             mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
             children: [
-              pw.Image(logo, width: 80),
+              // Logo (small top-left)
+              pw.Image(logo, width: 60),
+
+              // Company Info (right aligned)
               pw.Column(
                 crossAxisAlignment: pw.CrossAxisAlignment.end,
                 children: [
                   pw.Text("AASHUTOSH SALES CENTER",
                       style: pw.TextStyle(
-                          fontSize: 16, fontWeight: pw.FontWeight.bold)),
-                  pw.Text("Office No.124, 1st Floor, Meghmalhar Complex"),
-                  pw.Text("Sector-11, Gandhinagar: 382010"),
-                  pw.Text("GSTIN: 24AAJPT3116D1Z0 | PAN: AAJPT3116D"),
-                  pw.Text("Phone: +91 9426513615"),
+                          fontSize: 18,
+                          fontWeight: pw.FontWeight.bold,
+                          color: PdfColors.red)), // 🔴 red title
+
+                  pw.SizedBox(height: 4),
+
+                  pw.Text("OFFICE NO-124, 1ST FLOOR, MEGHMALHAR COMPLEX",
+                      style: pw.TextStyle(fontSize: 9)),
+                  pw.Text("SECTOR-11, GANDHINAGAR: 382010",
+                      style: pw.TextStyle(fontSize: 9)),
+                  pw.SizedBox(height: 4),
+                  pw.Text("Subject to Gandhinagar Jurisdiction",
+                      style: pw.TextStyle(fontSize: 9)),
+                  pw.Text("GSTIN: 24AAJPT3116D1Z0", style: pw.TextStyle(fontSize: 9)),
+                  pw.Text("UDYAM-GJ-09-0062055", style: pw.TextStyle(fontSize: 9)),
+                  pw.Text("PAN No. AAJPT3116D", style: pw.TextStyle(fontSize: 9)),
+                  pw.Text("STATE: GUJARAT  |  STATE CODE: 24",
+                      style: pw.TextStyle(fontSize: 9)),
                 ],
               ),
             ],
           ),
+
           pw.SizedBox(height: 20),
 
-          // Title
+          // Title (centered, bold, black)
           pw.Center(
             child: pw.Text(
               _docType == "Quotation" ? "QUOTATION" : "FINAL BILL",
-              style:
-              pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold),
+              style: pw.TextStyle(
+                fontSize: 16,
+                fontWeight: pw.FontWeight.bold,
+                color: PdfColors.black,
+              ),
             ),
           ),
+
+
           pw.SizedBox(height: 20),
+
 
           // Client + Doc info
           pw.Row(
@@ -137,39 +162,62 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           pw.SizedBox(height: 20),
 
+          // Items Table (clean black border, bold headers)
           // Items Table
           pw.Table.fromTextArray(
             headers: _docType == "Quotation"
-                ? ["Description", "Unit Price"]
-                : ["Qty", "Description", "Unit Price", "Total"],
+                ? ["Description", "Unit Price (₹)"]
+                : ["Qty", "Description", "Unit Price (₹)", "Total (₹)"],
             data: items.map((item) {
               if (_docType == "Quotation") {
-                return [item.description, "₹${item.price}"];
+                return [
+                  item.description,
+                  "₹${item.price.toStringAsFixed(2)}"
+                ]; // force string ✅
               } else {
                 return [
-                  item.qty.toString(),
+                  item.qty.toString(), // ✅ force string
                   item.description,
-                  "₹${item.price}",
-                  "₹${item.qty * item.price}"
+                  "₹${item.price.toStringAsFixed(2)}",
+                  "₹${(item.qty * item.price).toStringAsFixed(2)}"
                 ];
               }
             }).toList(),
-            border: pw.TableBorder.all(),
-            cellAlignment: pw.Alignment.centerLeft,
+            border: pw.TableBorder.all(color: PdfColors.black),
             headerStyle: pw.TextStyle(
-                fontWeight: pw.FontWeight.bold, color: PdfColors.white),
-            headerDecoration: const pw.BoxDecoration(color: PdfColors.blue),
+                fontWeight: pw.FontWeight.bold, fontSize: 11),
+            cellStyle: pw.TextStyle(fontSize: 10),
+            headerDecoration: const pw.BoxDecoration(), // no bg
+            cellAlignments: _docType == "Quotation"
+                ? {
+              0: pw.Alignment.centerLeft,
+              1: pw.Alignment.centerRight,
+            }
+                : {
+              0: pw.Alignment.center,
+              1: pw.Alignment.centerLeft,
+              2: pw.Alignment.centerRight,
+              3: pw.Alignment.centerRight,
+            },
           ),
+
           pw.SizedBox(height: 20),
 
-          // Grand total
-          if (_docType == "Bill")
-            pw.Align(
-              alignment: pw.Alignment.centerRight,
-              child: pw.Text("Grand Total: ₹$total",
-                  style: pw.TextStyle(
-                      fontSize: 16, fontWeight: pw.FontWeight.bold)),
+// Grand Total + Words (for both Quotation & Bill now)
+          pw.Align(
+            alignment: pw.Alignment.centerRight,
+            child: pw.Text("Grand Total: ₹${total.toStringAsFixed(2)}",
+                style: pw.TextStyle(
+                    fontSize: 13, fontWeight: pw.FontWeight.bold)),
+          ),
+          pw.SizedBox(height: 5),
+          pw.Align(
+            alignment: pw.Alignment.centerRight,
+            child: pw.Text(
+              "Amount in words: ${NumberToWord().convert('en-in', total.toInt())} Rupees Only",
+              style: pw.TextStyle(fontSize: 9, fontStyle: pw.FontStyle.italic),
             ),
+          ),
 
           // Footer
           pw.SizedBox(height: 30),
@@ -187,13 +235,32 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
 
-    // Save locally
-    final dir = await getApplicationDocumentsDirectory();
+    // Save to Downloads
+    final downloadsDir = Directory("/storage/emulated/0/Download");
+    if (!downloadsDir.existsSync()) {
+      downloadsDir.createSync(recursive: true);
+    }
+
     final file = File(
-        "${dir.path}/${_docType}_${DateTime.now().millisecondsSinceEpoch}.pdf");
+        "${downloadsDir.path}/${_docType}_${DateTime.now().millisecondsSinceEpoch}.pdf");
     await file.writeAsBytes(await pdf.save());
 
-    // Open the PDF
+    // Confirmation snackbar with Share action
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text("PDF saved to Downloads: ${file.path.split('/').last}"),
+        backgroundColor: Colors.green,
+        action: SnackBarAction(
+          label: "Share",
+          textColor: Colors.white,
+          onPressed: () {
+            Share.shareXFiles([XFile(file.path)], text: "Here’s the $_docType PDF");
+          },
+        ),
+      ),
+    );
+
+    // Auto open PDF
     await OpenFile.open(file.path);
   }
 
@@ -356,7 +423,7 @@ class _HomeScreenState extends State<HomeScreen> {
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
-                onPressed: _generatePdf,
+                onPressed: () => _generatePdf(context),
                 child: const Text("Generate PDF"),
               ),
             ),
